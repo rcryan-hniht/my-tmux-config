@@ -1,4 +1,4 @@
-# tmux-config
+# my-tmux-config
 
 Personal tmux configuration (`prefix = Ctrl+Space`) with Vi-modal `fzf` popups, adaptive light/dark themes, and custom utility scripts.
 
@@ -8,40 +8,25 @@ Personal tmux configuration (`prefix = Ctrl+Space`) with Vi-modal `fzf` popups, 
 - `themes.conf` - Adaptive `@theme-*` palette (`#{client_theme}` light/dark), status bar, and copy-mode styles.
 - `scripts/` - Standalone popup pickers, monitors, and lifecycle hooks.
 
-## Core tmux Keybindings
+## Installation
 
-Prefix is `Ctrl+Space`.
+### Requirements
 
-| Key | Action |
-| :--- | :--- |
-| `prefix + n` / `t` | New window / new session (current path) |
-| `prefix + x` | Kill current pane without confirmation |
-| `prefix + Space` | Switch to last window |
-| `prefix + Left` / `Right` or `H` / `L` | Previous / next window (repeatable) |
-| `prefix + \` or `\|` / `-` | Split pane horizontally / vertically (current path) |
-| `prefix + h/j/k/l` | Resize pane (repeatable) |
-| `prefix + m` | Toggle pane zoom |
-| `Ctrl+Alt + h/j/k/l` | Swap pane with adjacent pane (no prefix) |
-| `prefix + b` | Break pane into a new window |
-| `prefix + Alt + h` / `l` | Join pane horizontally into previous / next window |
-| `prefix + Alt + k` / `j` | Join pane vertically into previous / next window |
-| `prefix + p` | Paste from Wayland clipboard (`wl-paste`) |
-| `prefix + r` | Reload `tmux.conf` |
-| `prefix + g` / `G` / `B` / `T` | Popup: `lazygit` / `lazydocker` / `btop` / `todo.md` |
+- `tmux` >= 3.4, `fzf` >= 0.62, `python3`, `awk`, `curl`
+- Optional: `fd`, `tdf`, `pdftoppm`, `tectonic`, `sigye`, `cava`, `lazygit`, `lazydocker`, `btop`, `wl-clipboard`, `fcitx5`
 
-## Shared Popup Navigation
+### Setup
 
-All `fzf` popups start in Vi-modal navigation mode (input hidden):
+```bash
+git clone https://github.com/rcryan-hniht/my-tmux-config ~/.config/tmux
+git clone https://github.com/tmux-plugins/tpm ~/.config/tmux/plugins/tpm
+```
 
-| Key | Action |
-| :--- | :--- |
-| `j` / `k` | Move selection down / up |
-| `l` / `Enter` | Open / apply selected item |
-| `/` | Show search input |
-| `Esc` | Hide search input (or close popup if already hidden) |
-| `q` | Close popup |
+Launch `tmux` and press `Ctrl+Space` then `Shift+I` to install TPM plugins (`vim-tmux-navigator`, `tmux-resurrect`, `tmux-continuum`, `tmux-yank`).
 
 ## Scripts
+
+All `fzf` popups start in Vi-modal navigation mode (input hidden): `j`/`k` move, `l`/`Enter` open/apply, `/` search, `Esc` hide input or close, `q` close.
 
 ### `scripts/tmux-agents.sh` (`prefix + a`)
 Fullscreen monitor and controller for AI coding agents (`agy`, `claude`, `codex`, `opencode`). Displays live animated states (180ms Unix socket `reload-sync`), active-agent quota footer (`agy`, `codex`, `claude`), live conversation preview with compact `agy` swarm roster, and dedicated roster/quota views.
@@ -183,18 +168,23 @@ Runs `tmux-resurrect`'s `save.sh` on `client-detached` and backfills the `state`
 ### `scripts/resurrect-ttl.sh` (startup + attach hook)
 Deletes `tmux-resurrect` snapshots older than 48 hours and prunes detached sessions idle for more than 48 hours on `client-attached`. No interactive keybinds.
 
-## Installation
+## Core Keybindings
 
-### Requirements
+Prefix is `Ctrl+Space`.
 
-- `tmux` >= 3.4, `fzf` >= 0.62, `python3`, `awk`, `curl`
-- Optional: `fd`, `tdf`, `pdftoppm`, `tectonic`, `sigye`, `cava`, `lazygit`, `lazydocker`, `btop`, `wl-clipboard`, `fcitx5`
-
-### Setup
-
-```bash
-git clone https://github.com/rcryan-hniht/tmux-config ~/.config/tmux
-git clone https://github.com/tmux-plugins/tpm ~/.config/tmux/plugins/tpm
-```
-
-Launch `tmux` and press `Ctrl+Space` then `Shift+I` to install TPM plugins (`vim-tmux-navigator`, `tmux-resurrect`, `tmux-continuum`, `tmux-yank`).
+| Key | Action |
+| :--- | :--- |
+| `prefix + n` / `t` | New window / new session (current path) |
+| `prefix + x` | Kill current pane without confirmation |
+| `prefix + Space` | Switch to last window |
+| `prefix + Left` / `Right` or `H` / `L` | Previous / next window (repeatable) |
+| `prefix + \` or `\|` / `-` | Split pane horizontally / vertically (current path) |
+| `prefix + h/j/k/l` | Resize pane (repeatable) |
+| `prefix + m` | Toggle pane zoom |
+| `Ctrl+Alt + h/j/k/l` | Swap pane with adjacent pane (no prefix) |
+| `prefix + b` | Break pane into a new window |
+| `prefix + Alt + h` / `l` | Join pane horizontally into previous / next window |
+| `prefix + Alt + k` / `j` | Join pane vertically into previous / next window |
+| `prefix + p` | Paste from Wayland clipboard (`wl-paste`) |
+| `prefix + r` | Reload `tmux.conf` |
+| `prefix + g` / `G` / `B` / `T` | Popup: `lazygit` / `lazydocker` / `btop` / `todo.md` |
