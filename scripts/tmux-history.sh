@@ -47,7 +47,7 @@ q="$(printf "'%s'" "$self")"
 list | fzf --ansi --height=100% --border=none --margin=0 --padding=0,1 --layout=reverse \
 	--no-scrollbar --no-separator --info=inline-right --pointer='▌' --multi \
 	--delimiter=$'\t' --with-nth=1,2 --prompt='/ ' \
-	--header='j/k: chọn · Tab: multi · x: xóa · /: tìm · q: thoát' \
+	--header='j/k: move · Tab: multi · x: delete · /: find · q: quit' \
 	--bind='start:hide-input' \
 	--bind='j:down,k:up,q:abort' \
 	--bind="x:execute-silent($q --delete {+1})+reload-sync($q --list)" \

@@ -43,7 +43,7 @@ out="$(
 		--multi \
 		--delimiter=$'\t' \
 		--prompt='Kill > ' \
-		--header='j/k: chọn · Tab: multi · l/Enter: kill · ^x: kill -9 · /: tìm · q: thoát' \
+		--header='j/k: move · Tab: multi · l/Enter: kill · ^x: kill -9 · /: find · q: quit' \
 		--expect='ctrl-x' \
 		--bind='start:hide-input' \
 		--bind='j:down,k:up,l:accept,q:abort' \

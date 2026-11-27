@@ -17,7 +17,7 @@ out="$(
 		--info=inline-right \
 		--print-query \
 		--prompt='CLI > ' \
-		--header='j/k: chọn · l/Enter: mở · /: tìm hoặc nhập lệnh · q: thoát' \
+		--header='j/k: move · l/Enter: open · /: find or enter cmd · q: quit' \
 		--bind='start:hide-input' \
 		--bind='j:down,k:up,l:accept,q:abort' \
 		--bind='/:show-input+unbind(j,k,l,q,/)' \

@@ -27,7 +27,7 @@ out="$(
 		--info=inline-right \
 		--print-query \
 		--prompt='SSH > ' \
-		--header='j/k: chọn · l/Enter: kết nối · /: tìm hoặc nhập user@host · q: thoát' \
+		--header='j/k: move · l/Enter: connect · /: find or user@host · q: quit' \
 		--bind='start:hide-input' \
 		--bind='j:down,k:up,l:accept,q:abort' \
 		--bind='/:show-input+unbind(j,k,l,q,/)' \

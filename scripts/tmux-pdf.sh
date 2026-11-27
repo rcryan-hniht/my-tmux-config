@@ -279,37 +279,37 @@ preview_pdf() {
 list_keymaps() {
 	{
 		cat <<'EOF'
-[Popup]	j / k	Di chuyển con trỏ xuống / lên
-[Popup]	l / Enter	Mở PDF ở pane trái (hoặc thay vào pane tdf đang mở)
-[Popup]	/	Mở ô tìm kiếm (trong ô tìm kiếm: Esc để quay lại j/k)
-[Popup]	q / Esc	Đóng popup
-[Popup]	Ctrl-s	Mở PDF ở pane phải
-[Popup]	Ctrl-v	Mở PDF ở pane dưới
-[Popup]	Ctrl-w	Mở PDF ở window mới
-[Popup]	Ctrl-r	Xem danh sách PDF mở gần đây
-[Popup]	Ctrl-a	Xem danh sách tất cả PDF
-[Popup]	Ctrl-/	Ẩn / hiện preview trang bìa
-[Popup]	?	Mở bảng tìm keymap
-[tdf]	J / K, PgDn / PgUp	Trang tiếp / trang trước
-[tdf]	h / j / k / l	Cuộn trái / xuống / lên / phải
-[tdf]	Ctrl-d / Ctrl-u	Cuộn nửa trang xuống / lên
-[tdf]	Ctrl-f / Ctrl-b / Space	Cuộn cả màn hình xuống / lên
-[tdf]	H / L / P	Đầu trang / cuối trang / khớp trang
-[tdf]	gg / G / [N]gg	Trang đầu / cuối / nhảy tới trang N
-[tdf]	a / s	Fit toàn trang (a) / Fit chiều rộng (s)
-[tdf]	zi / zo / z0 / + / - / =	Phóng to / thu nhỏ / đặt lại zoom
-[tdf]	Tab	Bật/tắt mục lục Index (TOC)
-[tdf]	f / F / c	Mở link / hiện link / copy link
-[tdf]	v / V / gv / y / Y	Visual mode chọn text / copy / copy đường dẫn file
-[tdf]	m<char> / '<char>	Đặt quickmark / nhảy tới quickmark
-[tdf]	Ctrl-o / Ctrl-i	Lịch sử nhảy trước / sau (Jumplist)
-[tdf]	Ctrl-j / Ctrl-k	Bisect tiến / lùi
-[tdf]	/ / ? / n / N / Esc	Tìm kiếm / kết quả tiếp-trước / bỏ highlight
-[tdf]	d / D / w	2 trang / đảo trang đầu riêng / 1 trang
-[tdf]	r / R / Ctrl-r	Xoay 90° / Reload / Đảo màu
-[tdf]	F5 / F11 / Ctrl-n	Fullscreen / ẩn-hiện thanh trạng thái
-[tdf]	:	Thanh lệnh (:bmark, :bjump, :blist, :bdel, :offset, :info, :help, :q)
-[tdf]	q	Thoát tdf
+[Popup]	j / k	Move cursor down / up
+[Popup]	l / Enter	Open PDF in a new window (tdf)
+[Popup]	/	Open search input (Esc returns to j/k)
+[Popup]	q / Esc	Close popup
+[Popup]	Ctrl-s	Open PDF in right horizontal split
+[Popup]	Ctrl-v	Open PDF in bottom vertical split
+[Popup]	Ctrl-w	Open PDF in a new window
+[Popup]	Ctrl-r	Show recently opened PDFs
+[Popup]	Ctrl-a	Show all PDFs
+[Popup]	Ctrl-/	Toggle cover preview
+[Popup]	?	Open keymap finder
+[tdf]	J / K, PgDn / PgUp	Next / previous page
+[tdf]	h / j / k / l	Pan left / down / up / right
+[tdf]	Ctrl-d / Ctrl-u	Scroll half-page down / up
+[tdf]	Ctrl-f / Ctrl-b / Space	Scroll full screen down / up
+[tdf]	H / L / P	Top of page / bottom of page / fit page
+[tdf]	gg / G / [N]gg	First page / last page / jump to page N
+[tdf]	a / s	Fit whole page (a) / fit width (s)
+[tdf]	zi / zo / z0 / + / - / =	Zoom in / zoom out / reset zoom
+[tdf]	Tab	Toggle table of contents (Index)
+[tdf]	f / F / c	Open link / show links / copy link
+[tdf]	v / V / gv / y / Y	Visual select text / copy / copy file path
+[tdf]	m<char> / '<char>	Set quickmark / jump to quickmark
+[tdf]	Ctrl-o / Ctrl-i	Jump backward / forward (Jumplist)
+[tdf]	Ctrl-j / Ctrl-k	Bisect forward / backward
+[tdf]	/ / ? / n / N / Esc	Search / next-prev match / clear highlight
+[tdf]	d / D / w	Two-page / toggle cover spread / single-page
+[tdf]	r / R / Ctrl-r	Rotate 90° / reload / invert colors
+[tdf]	F5 / F11 / Ctrl-n	Fullscreen / toggle status bar
+[tdf]	:	Command line (:bmark, :bjump, :blist, :bdel, :offset, :info, :help, :q)
+[tdf]	q	Quit tdf
 EOF
 		if tmux list-keys -N -T prefix >/dev/null 2>&1; then
 			tmux list-keys -N -T prefix | awk '{
@@ -350,7 +350,7 @@ run_keymaps_finder() {
 		--info=inline-right \
 		--pointer='▌' \
 		--prompt='/ ' \
-		--header='j/k: di chuyển · /: tìm · q/l/Enter/Esc: quay lại' \
+		--header='j/k: move · /: find · q/l/Enter/Esc: back' \
 		--bind='start:hide-input' \
 		--bind='j:down,k:up,l:abort,q:abort,enter:abort,?:abort' \
 		--bind='/:show-input+unbind(j,k,l,q,/,?)' \
@@ -469,7 +469,7 @@ popup_picker() {
 			--info=inline-right \
 			--pointer='▌' \
 			--prompt='PDF > ' \
-			--header='l/Enter: mở · /: tìm · ^r: gần đây · ?: keymap' \
+			--header='l/Enter: open · /: find · ^r: recent · ?: keys' \
 			--expect='ctrl-s,ctrl-v,ctrl-w' \
 			--bind="start:hide-input" \
 			--bind="j:down,k:up,l:accept,q:abort" \

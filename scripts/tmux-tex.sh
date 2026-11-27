@@ -174,7 +174,7 @@ popup_picker() {
 			--no-separator \
 			--info=inline-right \
 			--prompt='TeX > ' \
-			--header='l/Enter: watch · /: tìm · ^r: build 1 lần · ^l: log · q: thoát' \
+			--header='l/Enter: watch · /: find · ^r: build once · ^l: log · q: quit' \
 			--expect='ctrl-r,ctrl-l' \
 			--bind='start:hide-input' \
 			--bind='j:down,k:up,l:accept,q:abort' \

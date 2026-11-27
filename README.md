@@ -29,7 +29,7 @@ Launch `tmux` and press `Ctrl+Space` then `Shift+I` to install TPM plugins (`vim
 All `fzf` popups start in Vi-modal navigation mode (input hidden): `j`/`k` move, `l`/`Enter` open/apply, `/` search, `Esc` hide input or close, `q` close.
 
 ### `scripts/tmux-agents.sh` (`prefix + a`)
-Fullscreen monitor and controller for AI coding agents (`agy`, `claude`, `codex`, `opencode`). Displays live animated states (180ms Unix socket `reload-sync`), active-agent quota footer (`agy`, `codex`, `claude`), live conversation preview with compact `agy` swarm roster, and dedicated roster/quota views.
+Fullscreen isolated-socket monitor and controller for AI coding agents (`agy`, `claude`, `codex`, `opencode`). Stacks the Vi-modal `fzf` agent list, a horizontal `cava-wave` visualizer, and an auto-refreshing active-agent quota pane (`agy`, `codex`, `claude`) on the left, paired with a full-height live preview pane on the right (conversation + compact `agy` swarm roster, full roster, and full quota views).
 
 | Key | Action |
 | :--- | :--- |
@@ -46,6 +46,23 @@ Fullscreen monitor and controller for AI coding agents (`agy`, `claude`, `codex`
 | `Alt-x` / `Ctrl-x` | Kill selected pane |
 | `Ctrl-/` | Toggle preview pane |
 | `?` / `F1` | Open in-popup keymap help |
+
+### `scripts/tmux-atk.sh` / `scripts/tmux-atk.py` (`prefix + A`)
+Fullscreen isolated-socket RGB studio for the ATK68 V2 (`atk` daemon). Runs three independent pane processes: an event-driven 4-tab control deck on the left (`Modes`, `Palettes`, `Solid`, `Tuning`), a live 24-bit TrueColor staggered 68-key keyboard visualizer on the top right, and live sliders, USB telemetry, and hardware actions on the bottom right.
+
+| Key | Action |
+| :--- | :--- |
+| `j` / `k` | Move cursor |
+| `h` / `l` or `Tab` / `1-4` | Switch tab or adjust sliders |
+| `Enter` | Apply selected mode, palette, or solid color |
+| `n` / `p` | Cycle visualizer mode / palette |
+| `[` / `]` and `-` / `+` | Adjust brightness / sensitivity |
+| `#` | Enter custom `#RRGGBB` hex color |
+| `g` (Solid tab) | Use solid color as audio-reactive palette |
+| `Space` | Start / stop live audio daemon |
+| `x` / `f` | Pin palette / freeze live SRAM frame |
+| `R` | Restore original `backup.json` |
+| `?` | Open keymap help popup |
 
 ### `scripts/tmux-agent-hook.sh` (hook)
 Lifecycle hook invoked by `agy`, `claude`, `codex`, and tmux focus hooks (`after-select-pane`, `after-select-window`, `client-session-changed`). Persists per-pane agent state (`working`, `blocked`, `done`, `idle`) and clears unseen status when focused. No interactive keybinds.
@@ -185,6 +202,7 @@ Prefix is `Ctrl+Space`.
 | `prefix + b` | Break pane into a new window |
 | `prefix + Alt + h` / `l` | Join pane horizontally into previous / next window |
 | `prefix + Alt + k` / `j` | Join pane vertically into previous / next window |
+| `Ctrl+i` | Toggle copy-mode (passthrough in Vim/Neovim) |
 | `prefix + p` | Paste from Wayland clipboard (`wl-paste`) |
 | `prefix + r` | Reload `tmux.conf` |
 | `prefix + g` / `G` / `B` / `T` | Popup: `lazygit` / `lazydocker` / `btop` / `todo.md` |

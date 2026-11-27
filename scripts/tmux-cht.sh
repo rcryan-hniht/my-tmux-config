@@ -47,7 +47,7 @@ out="$(
 		--print-query \
 		--expect='ctrl-p,ctrl-r' \
 		--prompt='Topic > ' \
-		--header='l/Enter: pane phải · ^p: popup · ^r: mở lại · /: tìm · q: thoát' \
+		--header='l/Enter: right pane · ^p: popup · ^r: reopen · /: find · q: quit' \
 		--bind='start:hide-input' \
 		--bind='j:down,k:up,l:accept,q:abort' \
 		--bind='/:show-input+unbind(j,k,l,q,/)' \

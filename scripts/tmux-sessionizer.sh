@@ -28,7 +28,7 @@ selected="$(
 		--no-separator \
 		--info=inline-right \
 		--prompt='Project > ' \
-		--header='j/k: chọn · l/Enter: mở · /: tìm · q: thoát' \
+		--header='j/k: move · l/Enter: open · /: find · q: quit' \
 		--bind='start:hide-input' \
 		--bind='j:down,k:up,l:accept,q:abort' \
 		--bind='/:show-input+unbind(j,k,l,q,/)' \

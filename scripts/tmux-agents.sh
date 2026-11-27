@@ -881,7 +881,7 @@ if os.environ.get("ROSTER_COMPACT") == "1":
     print()
     print(rule_c)
     if primary is None:
-        print("\033[1;36mSwarm\033[0m \033[2m· không có swarm cho pane này · [s] xem tất cả\033[0m")
+        print("\033[1;36mSwarm\033[0m \033[2m· no swarm for this pane · [s] view all\033[0m")
         sys.exit(0)
     alive_c = [m for m in primary["members"] if m["state"] != "killed"]
     work_c = [m for m in alive_c if m["state"] == "working"]
@@ -906,7 +906,7 @@ if primary is None and all_conv_ids:
     is_fallback = True
 
 if primary is None:
-    print(f"\033[1;36mSwarm Roster\033[0m  \033[2m· [s] quay lại\033[0m")
+    print(f"\033[1;36mSwarm Roster\033[0m  \033[2m· [s] back\033[0m")
     print(f"\033[2m{trunc(spath or '—', max_w)}\033[0m")
     print()
     print("\033[2mKhông có swarm nào đang hoạt động.\033[0m")
@@ -917,10 +917,10 @@ working = [m for m in alive if m["state"] == "working"]
 rule = "\033[2m" + ("─" * max_w) + "\033[0m"
 
 # Exact 2-line sticky header (~2)
-tag = "gần nhất" if is_fallback else "pane này"
-title_budget = max(10, max_w - (6 + len(tag) + 19))
+tag = "latest" if is_fallback else "this pane"
+title_budget = max(10, max_w - (6 + len(tag) + 15))
 hdr_title = trunc(primary["title"], title_budget)
-print(f"\033[1;36mSwarm\033[0m \033[1m{hdr_title}\033[0m \033[2m({tag}) · [s] quay lại\033[0m")
+print(f"\033[1;36mSwarm\033[0m \033[1m{hdr_title}\033[0m \033[2m({tag}) · [s] back\033[0m")
 
 goal = (primary["plan"].get("goal") or {})
 goal_line = goal.get("line") or goal.get("title") or spath or primary["conv_id"][:8]
@@ -1212,8 +1212,13 @@ PY
 			rm -f "$cl_tmp"
 		fi
 
-		if [ -n "$sock_file" ] && [ -S "$sock_file" ] && command -v curl >/dev/null 2>&1; then
-			curl -fsS --max-time 1 --unix-socket "$sock_file" http://localhost -d 'refresh-preview' >/dev/null 2>&1 || true
+		if [ -n "$sock_file" ]; then
+			if [ -d "$sock_file" ]; then
+				[ -p "$sock_file/quota.fifo" ] && printf 'refresh\n' 1<>"$sock_file/quota.fifo" 2>/dev/null || true
+				[ -p "$sock_file/prev.fifo" ] && printf 'refresh\n' 1<>"$sock_file/prev.fifo" 2>/dev/null || true
+			elif [ -S "$sock_file" ] && command -v curl >/dev/null 2>&1; then
+				curl -fsS --max-time 1 --unix-socket "$sock_file" http://localhost -d 'refresh-preview' >/dev/null 2>&1 || true
+			fi
 		fi
 	) </dev/null >/dev/null 2>&1 &
 }
@@ -1344,7 +1349,7 @@ if cdata:
 
 # Exact 2-line sticky header (~2)
 if max_w >= 62:
-    print(f"\033[1;35magy Quota & Credits\033[0m  \033[2m· [u] quay lại · auto 2s\033[0m")
+    print(f"\033[1;35magy Quota & Credits\033[0m  \033[2m· [u] back · auto 2s\033[0m")
 elif max_w >= 46:
     print(f"\033[1;35magy Quota & Credits\033[0m \033[2m· [u] · 2s\033[0m")
 else:
@@ -1375,7 +1380,7 @@ if qdata is None:
         print("\033[33m⠋ Đang tải quota từ agy (/quota & /credits)...\033[0m")
         print("\033[2mMàn hình sẽ tự động cập nhật sau ~3–4 giây.\033[0m")
     elif not err_msg:
-        print("\033[2mChưa có dữ liệu quota. Nhấn Ctrl-r để tải.\033[0m")
+        print("\033[2mNo quota data yet. Press Ctrl-r to load.\033[0m")
     sys.exit(0)
 
 groups = ((qdata.get("command") or {}).get("data") or {}).get("groups") or []
@@ -1556,6 +1561,13 @@ if "claude" in active:
 PY
 }
 
+notify_fifo() {
+	local fifo="${1:-}"
+	local msg="${2:-refresh}"
+	[ -p "$fifo" ] || return 0
+	printf '%s\n' "$msg" 1<>"$fifo" 2>/dev/null || true
+}
+
 # Toggle preview mode between target (roster|quota) and pane; outputs fzf actions for transform().
 toggle_pmode() {
 	local target="${1:-roster}"
@@ -1573,6 +1585,110 @@ toggle_pmode() {
 		fi
 		printf 'change-preview-window(right,62%%,border-left,wrap,~2,nofollow)+refresh-preview'
 	fi
+}
+
+# Multi-pane variant: toggle preview mode and wake the Preview pane immediately.
+toggle_pmode_pane() {
+	local target="${1:-roster}"
+	local run_dir="${2:-}"
+	[ -n "$run_dir" ] || return 0
+	local pmode_file="${run_dir}/pmode"
+	local pm="pane"
+	[ -f "$pmode_file" ] && pm="$(cat "$pmode_file" 2>/dev/null || echo pane)"
+	if [ "$pm" = "$target" ]; then
+		printf 'pane\n' >"$pmode_file"
+	else
+		printf '%s\n' "$target" >"$pmode_file"
+		if [ "$target" = "quota" ]; then
+			spawn_quota_refresh 0 "$run_dir" 2
+		fi
+	fi
+	notify_fifo "${run_dir}/prev.fifo" "mode"
+}
+
+# Multi-pane variant of Ctrl-r smart quota refresh.
+refresh_quota_smart_pane() {
+	local run_dir="${1:-}"
+	[ -n "$run_dir" ] || return 0
+	local pmode_file="${run_dir}/pmode"
+	local rows_cache="${run_dir}/rows"
+	local pm="pane"
+	[ -f "$pmode_file" ] && pm="$(cat "$pmode_file" 2>/dev/null || echo pane)"
+	if [ "$pm" = "quota" ]; then
+		spawn_quota_refresh 1 "$run_dir"
+	else
+		spawn_quota_refresh 1 "$run_dir" "$QUOTA_TTL" "$rows_cache"
+	fi
+	notify_fifo "${run_dir}/quota.fifo" "refresh"
+	notify_fifo "${run_dir}/prev.fifo" "refresh"
+}
+
+# Toggle between agents-only and all-panes mode; outputs fzf transform actions cleanly (no nested parens).
+toggle_mode_action() {
+	local mode_file="${1:-}"
+	local src_pane="${2:-}"
+	local left_text_w="${3:-48}"
+	local rows_cache="${4:-}"
+	local self_path q_self q_src q_rows_cache
+	self_path="$(realpath "${BASH_SOURCE[0]}")"
+	q_self="$(shell_quote "$self_path")"
+	q_src="$(shell_quote "$src_pane")"
+	q_rows_cache="$(shell_quote "$rows_cache")"
+
+	local m="agents"
+	[ -n "$mode_file" ] && [ -f "$mode_file" ] && m="$(cat "$mode_file" 2>/dev/null || echo agents)"
+	if [ "$m" = "agents" ]; then
+		[ -n "$mode_file" ] && printf 'all\n' >"$mode_file"
+		printf 'change-prompt(All > )+reload-sync(%s --list all %s %s 0 0 %s)+pos(1)' "$q_self" "$q_src" "$left_text_w" "$q_rows_cache"
+	else
+		[ -n "$mode_file" ] && printf 'agents\n' >"$mode_file"
+		printf 'change-prompt(Agents > )+reload-sync(%s --list agents %s %s 0 0 %s)+pos(1)' "$q_self" "$q_src" "$left_text_w" "$q_rows_cache"
+	fi
+}
+
+# Keep fzf selection glued to the same pane_id after reload-sync even if rows re-sort.
+restore_pos_action() {
+	local rows_cache="${1:-}"
+	local pinned_id="${2:-}"
+	# Do not override cursor position while user is actively filtering with a query.
+	[ -z "${FZF_QUERY:-}" ] || return 0
+	[ -n "$pinned_id" ] && [ -s "$rows_cache" ] || return 0
+	local target_pos
+	target_pos="$(awk -F '\t' -v id="$pinned_id" '$3 == id { print NR; exit }' "$rows_cache" 2>/dev/null || true)"
+	if [ -n "$target_pos" ] && [ "$target_pos" != "${FZF_POS:-}" ]; then
+		printf 'pos(%s)' "$target_pos"
+	fi
+}
+
+# Multi-pane Ctrl-/ handler: hide or restore the right full-height preview pane.
+toggle_preview_pane() {
+	local sock="${1:-}"
+	[ -n "$sock" ] || return 0
+	local p_fzf p_prev right_w cur_win prev_win
+	p_fzf="$(env -u TMUX tmux -L "$sock" show-options -gqv @fzf_pane 2>/dev/null || true)"
+	p_prev="$(env -u TMUX tmux -L "$sock" show-options -gqv @prev_pane 2>/dev/null || true)"
+	right_w="$(env -u TMUX tmux -L "$sock" show-options -gqv @prev_width 2>/dev/null || true)"
+	[ -n "$p_fzf" ] && [ -n "$p_prev" ] || return 0
+	cur_win="$(env -u TMUX tmux -L "$sock" display-message -p -t "$p_fzf" '#{window_id}' 2>/dev/null || true)"
+	prev_win="$(env -u TMUX tmux -L "$sock" display-message -p -t "$p_prev" '#{window_id}' 2>/dev/null || true)"
+	if [ -n "$cur_win" ] && [ "$prev_win" = "$cur_win" ]; then
+		env -u TMUX tmux -L "$sock" break-pane -d -s "$p_prev" -n "_hold_prev" 2>/dev/null || true
+	else
+		env -u TMUX tmux -L "$sock" join-pane -d -f -h -l "${right_w:-62%}" -t "$p_fzf" -s "$p_prev" 2>/dev/null || true
+	fi
+	env -u TMUX tmux -L "$sock" select-pane -t "$p_fzf" 2>/dev/null || true
+}
+
+# Multi-pane ? / F1 handler: open keybindings finder centered over the whole popup.
+open_keymaps_popup() {
+	local sock="${1:-}"
+	local self_path="${2:-}"
+	[ -n "$sock" ] && [ -n "$self_path" ] || return 0
+	local q_outer q_self
+	q_outer="$(shell_quote "${TMUX:-}")"
+	q_self="$(shell_quote "$self_path")"
+	env -u TMUX tmux -L "$sock" display-popup -E -b rounded -T " Keybindings" -w 78% -h 78% \
+		"TMUX=${q_outer} ${q_self} --keymaps" 2>/dev/null || true
 }
 
 # Dispatch preview according to per-popup preview_mode file (pane|roster|quota).
@@ -1610,27 +1726,27 @@ list_keymaps() {
 		if (scope == "[State]") color = "\033[33m"
 		printf "%s%-8s\033[0m  \033[1m%-18s\033[0m  %s\n", color, scope, key, desc
 	}'
-[Popup]	j / k	Di chuyển con trỏ xuống / lên
-[Popup]	l / Enter	Mở / nhảy tới pane đang chọn (tự đánh dấu đã xem)
-[Popup]	/	Mở ô tìm kiếm (trong ô tìm kiếm: Esc để quay lại j/k)
-[Popup]	s	Bật / tắt khung xem agy Swarm Roster & Board
-[Popup]	u	Bật / tắt khung xem agy Model Quota & AI Credits
-[Popup]	q / Esc	Thoát popup
-[Popup]	Ctrl-y	Duyệt nhanh / gửi phím Enter vào pane đang chọn
-[Popup]	Alt-e	Gửi phím Esc (hủy / dừng tác vụ) vào pane đang chọn
-[Popup]	Ctrl-s / Alt-d	Đánh dấu đã xem (done → idle) ngay tại chỗ
-[Popup]	Tab / Ctrl-a	Chuyển giữa chế độ chỉ Agent / tất cả pane tmux
-[Popup]	Ctrl-u / Ctrl-d	Cuộn nội dung preview lên / xuống nửa trang
-[Popup]	PgUp / PgDn	Cuộn nội dung preview lên / xuống nửa trang
-[Popup]	Alt-k / Alt-j	Cuộn nội dung preview lên / xuống 1 dòng
-[Popup]	Ctrl-r	Làm mới trạng thái, preview (và tải lại quota ở chế độ u)
-[Popup]	Alt-x / Ctrl-x	Đóng (kill) pane đang chọn
-[Popup]	Ctrl-/	Ẩn / hiện khung preview bên phải
-[Popup]	? / F1	Mở bảng phím tắt & chú thích trạng thái
-[State]	▲/◈ blocked	Nhấp nháy đỏ/vàng — chờ bạn duyệt quyền hoặc chọn đáp án (#1)
-[State]	●/◉ done	Nhịp thở xanh — vừa hoàn thành ở pane khác, chưa xem (#2)
-[State]	⠋..⠏ working	Vòng xoay Braille — đang suy nghĩ / chạy tool hoặc subagent (#3)
-[State]	◌ idle	Tĩnh — đang chờ lệnh tại prompt (#4)
+[Popup]	j / k	Move cursor down / up
+[Popup]	l / Enter	Jump to selected pane (auto marks as seen)
+[Popup]	/	Open search input (Esc returns to j/k)
+[Popup]	s	Toggle agy Swarm Roster & Board view
+[Popup]	u	Toggle agy Model Quota & AI Credits view
+[Popup]	q / Esc	Close popup
+[Popup]	Ctrl-y	Quick approve (send Enter to selected pane)
+[Popup]	Alt-e	Interrupt / cancel task (send Esc to selected pane)
+[Popup]	Ctrl-s / Alt-d	Mark as seen (done → idle) in place
+[Popup]	Tab / Ctrl-a	Toggle Agents only / All tmux panes
+[Popup]	Ctrl-u / Ctrl-d	Scroll preview half-page up / down
+[Popup]	PgUp / PgDn	Scroll preview half-page up / down
+[Popup]	Alt-k / Alt-j	Scroll preview one line up / down
+[Popup]	Ctrl-r	Refresh status, preview, and quota cache
+[Popup]	Alt-x / Ctrl-x	Kill selected pane
+[Popup]	Ctrl-/	Toggle right preview panel
+[Popup]	? / F1	Open keybindings & state legend
+[State]	▲/◈ blocked	Pulsing red/amber — waiting for approval or input (#1)
+[State]	●/◉ done	Breathing blue/cyan — finished in another pane, unread (#2)
+[State]	⠋..⠏ working	Braille spinner — thinking or running tools/subagents (#3)
+[State]	◌ idle	Static dim ring — waiting at prompt (#4)
 EOF
 }
 
@@ -1660,7 +1776,7 @@ run_keymaps_finder() {
 		--info=inline-right \
 		--pointer='▌' \
 		--prompt='/ ' \
-		--header='j/k: di chuyển · /: tìm · q/l/Enter/Esc: quay lại' \
+		--header='j/k: move · /: find · q/l/Enter/Esc: back' \
 		--bind='start:hide-input' \
 		--bind='j:down,k:up,l:abort,q:abort,enter:abort,?:abort,f1:abort' \
 		--bind='/:show-input+unbind(j,k,l,q,/,?)' \
@@ -1681,7 +1797,759 @@ jump_to_pane() {
 	tmux select-pane -t "$pane_id" 2>/dev/null || true
 }
 
-popup_monitor() {
+pane_preview_daemon() {
+	local run_dir="${1:-}"
+	local self_path="${2:-}"
+	[ -n "$run_dir" ] && [ -n "$self_path" ] || exit 1
+	python3 - "$run_dir" "$self_path" <<'PY'
+import os, re, select, shutil, signal, subprocess, sys, time, unicodedata
+
+run_dir, self_path = sys.argv[1], sys.argv[2]
+focus_file = os.path.join(run_dir, "focus")
+pmode_file = os.path.join(run_dir, "pmode")
+fifo_path = os.path.join(run_dir, "prev.fifo")
+
+ANSI_RE = re.compile(r"(\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\))")
+
+running = True
+resized = True
+
+def _stop(signum, frame):
+    global running
+    running = False
+
+def _winch(signum, frame):
+    global resized
+    resized = True
+
+signal.signal(signal.SIGTERM, _stop)
+signal.signal(signal.SIGHUP, _stop)
+signal.signal(signal.SIGINT, _stop)
+signal.signal(signal.SIGWINCH, _winch)
+
+def char_width(ch):
+    o = ord(ch)
+    if o < 32 or o == 127:
+        return 0
+    if unicodedata.combining(ch) or unicodedata.category(ch) in ("Mn", "Me", "Cf"):
+        return 0
+    return 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+
+def wrap_ansi_line(line, max_w):
+    line = line.replace("\r", "")
+    if not line:
+        return [""]
+    out = []
+    cur = []
+    cur_sgr = ""
+    col = 0
+    for tok in ANSI_RE.split(line):
+        if not tok:
+            continue
+        if tok.startswith("\x1b"):
+            if tok.endswith("m"):
+                if tok in ("\x1b[0m", "\x1b[m"):
+                    cur_sgr = ""
+                elif tok.startswith("\x1b[0;"):
+                    cur_sgr = tok
+                else:
+                    cur_sgr = (cur_sgr + tok) if len(cur_sgr) < 96 else tok
+                cur.append(tok)
+            continue
+        for ch in tok:
+            if ch == "\t":
+                sp = 4 - (col % 4)
+                if col + sp > max_w and col > 0:
+                    out.append("".join(cur) + "\x1b[0m")
+                    cur = [cur_sgr] if cur_sgr else []
+                    col = 0
+                else:
+                    cur.append(" " * sp)
+                    col += sp
+                continue
+            cw = char_width(ch)
+            if cw == 0:
+                if ord(ch) >= 32:
+                    cur.append(ch)
+                continue
+            if col + cw > max_w and col > 0:
+                out.append("".join(cur) + "\x1b[0m")
+                cur = [cur_sgr] if cur_sgr else []
+                col = 0
+            cur.append(ch)
+            col += cw
+    out.append("".join(cur) + "\x1b[0m")
+    return out
+
+def wrap_lines(lines, max_w):
+    res = []
+    for ln in lines:
+        res.extend(wrap_ansi_line(ln, max_w))
+    return res
+
+def read_focus():
+    try:
+        raw = open(focus_file, "r", encoding="utf-8", errors="ignore").read().rstrip("\r\n")
+        parts = raw.split("\t")
+        while len(parts) < 6:
+            parts.append("")
+        return tuple(parts[:6])
+    except Exception:
+        return ("", "", "", "", "", "")
+
+def read_pmode():
+    try:
+        pm = open(pmode_file, "r", encoding="utf-8").read().strip()
+        return pm if pm in ("pane", "roster", "quota") else "pane"
+    except Exception:
+        return "pane"
+
+def fetch_raw(pmode, focus, text_w):
+    pane_id, label, state, target, spath, model = focus
+    if pmode == "pane" and not pane_id:
+        return ["\033[2mNo pane selected\033[0m"]
+    env = os.environ.copy()
+    env["FZF_PREVIEW_COLUMNS"] = str(text_w)
+    try:
+        p = subprocess.run(
+            [self_path, "--preview", pmode, pane_id, label, state, target, spath, model],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            encoding="utf-8",
+            errors="ignore",
+            env=env,
+            timeout=1.5,
+        )
+        return p.stdout.splitlines()
+    except Exception:
+        return []
+
+fifo_fd = os.open(fifo_path, os.O_RDWR | os.O_NONBLOCK)
+
+pmode = read_pmode()
+focus = read_focus()
+follow = (pmode == "pane")
+scroll_top = 0
+raw_lines = []
+sticky_lines = []
+body_lines = []
+last_frame = None
+last_fetch = 0.0
+last_dims = (0, 0)
+need_fetch = True
+need_wrap = True
+
+def refresh_interval(pm):
+    if pm == "roster":
+        return 0.18
+    if pm == "quota":
+        return 2.0
+    return 0.36
+
+def paint(force=False):
+    global last_frame, scroll_top, sticky_lines, body_lines, need_wrap, last_dims, resized
+    cols, rows = shutil.get_terminal_size((90, 36))
+    cols = max(20, cols)
+    rows = max(4, rows)
+    text_w = max(16, cols - 2)
+    if (cols, rows) != last_dims:
+        need_wrap = True
+        last_dims = (cols, rows)
+    if need_wrap:
+        sticky_n = 2 if pmode in ("roster", "quota") else 0
+        raw_sticky = raw_lines[:sticky_n]
+        raw_body = raw_lines[sticky_n:]
+        sticky_lines = []
+        for sl in raw_sticky:
+            wrapped_s = wrap_ansi_line(sl, text_w)
+            sticky_lines.append(wrapped_s[0] if wrapped_s else "")
+        body_lines = wrap_lines(raw_body, text_w)
+        need_wrap = False
+
+    body_rows = max(1, rows - len(sticky_lines))
+    max_top = max(0, len(body_lines) - body_rows)
+    if follow:
+        scroll_top = max_top
+    else:
+        scroll_top = max(0, min(scroll_top, max_top))
+
+    visible = sticky_lines + body_lines[scroll_top : scroll_top + body_rows]
+    buf = ["\x1b[?25l\x1b[?2026h"]
+    for r in range(rows):
+        ln = visible[r] if r < len(visible) else ""
+        buf.append(f"\x1b[{r + 1};1H {ln}\x1b[0m\x1b[K")
+    if len(body_lines) > body_rows:
+        end_idx = min(len(body_lines), scroll_top + body_rows)
+        badge = f" {end_idx}/{len(body_lines)} "
+        bcol = max(1, cols - len(badge) + 1)
+        buf.append(f"\x1b[1;{bcol}H\x1b[2;7m{badge}\x1b[0m")
+    buf.append("\x1b[?2026l")
+    frame = "".join(buf)
+    if force or resized or frame != last_frame:
+        try:
+            sys.stdout.write(frame)
+            sys.stdout.flush()
+        except BrokenPipeError:
+            return False
+        last_frame = frame
+        resized = False
+    return True
+
+try:
+    sys.stdout.write("\x1b[?25l\x1b[2J")
+    sys.stdout.flush()
+    while running and os.path.isdir(run_dir):
+        now = time.monotonic()
+        interval = refresh_interval(pmode)
+        if resized:
+            cols, rows = shutil.get_terminal_size((90, 36))
+            if (cols, rows) != last_dims:
+                need_fetch = True
+                need_wrap = True
+        if need_fetch or (now - last_fetch >= interval):
+            cols, _ = shutil.get_terminal_size((90, 36))
+            text_w = max(16, cols - 2)
+            new_raw = fetch_raw(pmode, focus, text_w)
+            if new_raw != raw_lines or need_wrap:
+                raw_lines = new_raw
+                need_wrap = True
+            last_fetch = time.monotonic()
+            need_fetch = False
+            if not paint(force=resized):
+                break
+        elif resized:
+            if not paint(force=True):
+                break
+
+        rem = max(0.02, refresh_interval(pmode) - (time.monotonic() - last_fetch))
+        try:
+            rlist, _, _ = select.select([fifo_fd], [], [], min(rem, 0.25))
+        except InterruptedError:
+            continue
+        if not rlist:
+            continue
+
+        chunks = []
+        while True:
+            try:
+                data = os.read(fifo_fd, 4096)
+                if not data:
+                    break
+                chunks.append(data)
+            except BlockingIOError:
+                break
+        if not chunks:
+            continue
+
+        cmds = b"".join(chunks).decode("utf-8", errors="ignore").splitlines()
+        cols, rows = shutil.get_terminal_size((90, 36))
+        body_rows = max(1, rows - len(sticky_lines))
+        max_top = max(0, len(body_lines) - body_rows)
+        scrolled = False
+
+        for cmd in cmds:
+            cmd = cmd.strip()
+            if not cmd:
+                continue
+            if cmd == "quit":
+                running = False
+                break
+            elif cmd == "focus":
+                new_focus = read_focus()
+                if new_focus[0] != focus[0]:
+                    focus = new_focus
+                    if pmode == "pane":
+                        follow = True
+                    else:
+                        follow = False
+                        scroll_top = 0
+                    need_fetch = True
+                elif new_focus != focus:
+                    focus = new_focus
+                    need_fetch = True
+            elif cmd == "mode":
+                new_pm = read_pmode()
+                if new_pm != pmode:
+                    pmode = new_pm
+                    if pmode == "pane":
+                        follow = True
+                    else:
+                        follow = False
+                        scroll_top = 0
+                    need_fetch = True
+            elif cmd == "refresh":
+                need_fetch = True
+            elif cmd == "up":
+                cur_t = max_top if follow else scroll_top
+                scroll_top = max(0, cur_t - 1)
+                follow = False
+                scrolled = True
+            elif cmd == "down":
+                cur_t = max_top if follow else scroll_top
+                scroll_top = min(max_top, cur_t + 1)
+                follow = (pmode == "pane" and scroll_top >= max_top)
+                scrolled = True
+            elif cmd == "half-up":
+                step = max(1, body_rows // 2)
+                cur_t = max_top if follow else scroll_top
+                scroll_top = max(0, cur_t - step)
+                follow = False
+                scrolled = True
+            elif cmd == "half-down":
+                step = max(1, body_rows // 2)
+                cur_t = max_top if follow else scroll_top
+                scroll_top = min(max_top, cur_t + step)
+                follow = (pmode == "pane" and scroll_top >= max_top)
+                scrolled = True
+            elif cmd == "top":
+                scroll_top = 0
+                follow = False
+                scrolled = True
+            elif cmd == "bottom":
+                scroll_top = max_top
+                follow = (pmode == "pane")
+                scrolled = True
+
+        if scrolled and not need_fetch:
+            if not paint():
+                break
+finally:
+    try:
+        os.close(fifo_fd)
+    except Exception:
+        pass
+    try:
+        sys.stdout.write("\x1b[?2026l\x1b[0m\x1b[?25h")
+        sys.stdout.flush()
+    except Exception:
+        pass
+PY
+}
+
+pane_quota_daemon() {
+	local run_dir="${1:-}"
+	local inner_sock="${2:-}"
+	local cava_h="${3:-7}"
+	[ -n "$run_dir" ] || exit 1
+	python3 - "$run_dir" "$QUOTA_CACHE" "$CREDITS_CACHE" "$CODEX_QUOTA_CACHE" "$CLAUDE_QUOTA_CACHE" "$QUOTA_LOCK" "$inner_sock" "$cava_h" <<'PY'
+import json, os, select, shutil, signal, subprocess, sys, time
+from datetime import datetime
+
+run_dir, qp, cp, cxp, clp, lp, inner_sock, cava_h_s = sys.argv[1:9]
+cava_h = int(cava_h_s) if cava_h_s.isdigit() else 7
+rows_cache = os.path.join(run_dir, "rows")
+fifo_path = os.path.join(run_dir, "quota.fifo")
+
+running = True
+resized = True
+
+def _stop(signum, frame):
+    global running
+    running = False
+
+def _winch(signum, frame):
+    global resized
+    resized = True
+
+signal.signal(signal.SIGTERM, _stop)
+signal.signal(signal.SIGHUP, _stop)
+signal.signal(signal.SIGINT, _stop)
+signal.signal(signal.SIGWINCH, _winch)
+
+def cd_ts(ts):
+    if not ts:
+        return ""
+    d = int(ts - time.time())
+    if d <= 0: return "now"
+    if d < 3600: return f"{d // 60}m"
+    if d < 86400: return f"{d // 3600}h{(d % 3600) // 60:02d}m"
+    return f"{d // 86400}d{(d % 86400) // 3600}h"
+
+def cd(iso):
+    if not iso or iso.startswith("1970-01-01"):
+        return "full"
+    try:
+        dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+        return cd_ts(dt.timestamp())
+    except Exception:
+        return ""
+
+def win_label(mins):
+    if not mins: return "win"
+    if mins <= 360: return f"{mins // 60}h"
+    if mins <= 1440: return "1d"
+    if mins == 10080: return "wk"
+    return f"{mins // 1440}d"
+
+def bar(p, n):
+    p = max(0, min(100, int(p)))
+    f = int(round(p * n / 100.0))
+    c = "\033[32m" if p >= 50 else ("\033[33m" if p >= 20 else "\033[31m")
+    return f"{c}{'█' * f}\033[2m{'░' * (n - f)}\033[0m"
+
+def load_json(p):
+    try:
+        with open(p, encoding="utf-8") as fh:
+            return json.load(fh), int(time.time() - os.path.getmtime(p))
+    except Exception:
+        return None, None
+
+def read_active_agents():
+    active = set()
+    try:
+        with open(rows_cache, encoding="utf-8", errors="ignore") as fh:
+            for ln in fh:
+                parts = ln.rstrip("\n").split("\t")
+                if len(parts) >= 8 and parts[7] != "pane":
+                    active.add(parts[6])
+    except Exception:
+        pass
+    return active
+
+def build_lines(w):
+    active = read_active_agents()
+    q, q_age = load_json(qp)
+    c, _ = load_json(cp)
+    cx, cx_age = load_json(cxp)
+    cl, _ = load_json(clp)
+
+    cred = ((c or {}).get("command") or {}).get("data", {}).get("remaining_credits") if c else None
+    fetching = os.path.isdir(lp)
+    age = q_age if q_age is not None else cx_age
+    info = []
+    if age is not None: info.append(f"{age}s" if age < 60 else f"{age // 60}m")
+    if fetching: info.append("⟳")
+    if cred is not None: info.append(f"credits {cred}")
+
+    out = ["\033[1;35mQuota:\033[0m" + ("\033[2m · " + " · ".join(info) + "\033[0m" if info else "")]
+    bw = max(6, min(11, w - 30))
+
+    if not (active & {"agy", "codex", "claude"}):
+        out.append("  \033[2mNo active agents\033[0m")
+        return out
+
+    if "agy" in active:
+        out.append("\033[1;36m󱓞 agy\033[0m")
+        if q is None:
+            out.append("  \033[2m" + ("loading..." if fetching else "no data yet") + "\033[0m")
+        else:
+            for g in ((q.get("command") or {}).get("data") or {}).get("groups") or []:
+                name = ((g.get("name") or "?").split() or ["?"])[0][:6]
+                bs = sorted(g.get("buckets") or [], key=lambda b: 0 if b.get("window") == "weekly" else 1)
+                for i, b in enumerate(bs):
+                    win = b.get("window") or "?"
+                    lab = "wk" if win == "weekly" else win
+                    fr = b.get("remaining_fraction")
+                    p = int(round(fr * 100)) if isinstance(fr, (int, float)) else 0
+                    pc = "\033[32m" if p >= 50 else ("\033[33m" if p >= 20 else "\033[31m")
+                    nm = f"\033[1m{name:<6}\033[0m" if i == 0 else " " * 6
+                    out.append(f"  {nm} \033[2m{lab:<3}\033[0m {bar(p, bw)} {pc}{p:>3}%\033[0m \033[2m{cd(b.get('reset_time') or '')}\033[0m")
+
+    if "codex" in active:
+        cx_rl = (cx or {}).get("rateLimits") or {}
+        cx_plan = cx_rl.get("planType") or ""
+        out.append("\033[1;32m󰚩 codex\033[0m" + (f" \033[2m· {cx_plan}\033[0m" if cx_plan else ""))
+        if cx is None:
+            out.append("  \033[2m" + ("loading..." if fetching else "no data yet") + "\033[0m")
+        else:
+            wins = [x for x in (cx_rl.get("secondary"), cx_rl.get("primary")) if isinstance(x, dict)]
+            if not wins:
+                out.append("  \033[2munlimited / no rate limit\033[0m")
+            for x in wins:
+                used = x.get("usedPercent") or 0
+                rem = max(0, min(100, int(round(100 - used))))
+                lab = win_label(x.get("windowDurationMins"))
+                pc = "\033[32m" if rem >= 50 else ("\033[33m" if rem >= 20 else "\033[31m")
+                out.append(f"         \033[2m{lab:<3}\033[0m {bar(rem, bw)} {pc}{rem:>3}%\033[0m \033[2m{cd_ts(x.get('resetsAt'))}\033[0m")
+
+    if "claude" in active:
+        out.append("\033[1;33m󰜡 claude\033[0m")
+        if cl is None:
+            out.append("  \033[2m" + ("loading..." if fetching else "no data yet") + "\033[0m")
+        elif cl.get("status") == "ok" and isinstance(cl.get("data"), dict):
+            d = cl["data"]
+            lim = d.get("limit")
+            rem_usd = d.get("limit_remaining")
+            usg = d.get("usage")
+            if isinstance(lim, (int, float)) and lim > 0 and isinstance(rem_usd, (int, float)):
+                pct = max(0, min(100, int(round(rem_usd * 100 / lim))))
+                pc = "\033[32m" if pct >= 50 else ("\033[33m" if pct >= 20 else "\033[31m")
+                out.append(f"      \033[2mkey\033[0m {bar(pct, bw)} {pc}{pct:>3}%\033[0m \033[2m${rem_usd:.2f}\033[0m")
+            elif isinstance(usg, (int, float)):
+                out.append(f"  \033[2mOpenRouter used ${usg:.2f}\033[0m")
+            else:
+                out.append("  \033[2mOpenRouter unlimited\033[0m")
+        elif cl.get("source") == "openrouter":
+            st = cl.get("status", "err")
+            msg = "key expired/401" if st == "http_401" else st
+            out.append(f"  \033[2mOpenRouter · {msg}\033[0m")
+        else:
+            out.append("  \033[2mOAuth not signed in\033[0m")
+
+    return out
+
+def maybe_resize(desired_h, cur_rows, last_target):
+    if not inner_sock or desired_h == cur_rows or desired_h == last_target:
+        return last_target
+    env = os.environ.copy()
+    env.pop("TMUX", None)
+    try:
+        info = subprocess.check_output(
+            ["tmux", "-L", inner_sock, "display-message", "-p", "#{@fzf_pane}\t#{@quota_pane}\t#{window_height}"],
+            env=env,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=0.5,
+        ).strip().split("\t")
+        if len(info) != 3:
+            return desired_h
+        p_fzf, p_quota, win_h_s = info
+        win_h = int(win_h_s)
+        max_q = max(7, min(13, win_h // 3))
+        target_q = max(7, min(max_q, desired_h))
+        fzf_h = win_h - 2 - cava_h - target_q
+        if fzf_h < 8:
+            target_q = max(5, win_h - 2 - cava_h - 8)
+            fzf_h = win_h - 2 - cava_h - target_q
+        if target_q != cur_rows and p_fzf and p_quota and fzf_h >= 6:
+            subprocess.run(
+                ["tmux", "-L", inner_sock, "resize-pane", "-t", p_fzf, "-y", str(fzf_h), ";", "resize-pane", "-t", p_quota, "-y", str(target_q)],
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=0.5,
+            )
+        return target_q
+    except Exception:
+        return last_target
+
+fifo_fd = os.open(fifo_path, os.O_RDWR | os.O_NONBLOCK)
+last_frame = None
+last_resize_target = -1
+
+try:
+    sys.stdout.write("\x1b[?25l\x1b[2J")
+    sys.stdout.flush()
+    while running and os.path.isdir(run_dir):
+        cols, rows = shutil.get_terminal_size((56, 8))
+        w = max(24, cols - 2)
+        lines = build_lines(w)
+        desired_h = max(7, min(13, len(lines) + 1))
+        if desired_h != rows:
+            last_resize_target = maybe_resize(desired_h, rows, last_resize_target)
+            cols, rows = shutil.get_terminal_size((56, 8))
+
+        buf = ["\x1b[?25l\x1b[?2026h"]
+        for r in range(rows):
+            ln = lines[r] if r < len(lines) else ""
+            buf.append(f"\x1b[{r + 1};1H {ln}\x1b[0m\x1b[K")
+        buf.append("\x1b[?2026l")
+        frame = "".join(buf)
+        if resized or frame != last_frame:
+            try:
+                sys.stdout.write(frame)
+                sys.stdout.flush()
+            except BrokenPipeError:
+                break
+            last_frame = frame
+            resized = False
+
+        try:
+            rlist, _, _ = select.select([fifo_fd], [], [], 2.0)
+        except InterruptedError:
+            continue
+        if rlist:
+            chunks = []
+            while True:
+                try:
+                    data = os.read(fifo_fd, 4096)
+                    if not data:
+                        break
+                    chunks.append(data)
+                except BlockingIOError:
+                    break
+            if b"quit" in b"".join(chunks):
+                break
+finally:
+    try:
+        os.close(fifo_fd)
+    except Exception:
+        pass
+    try:
+        sys.stdout.write("\x1b[?2026l\x1b[0m\x1b[?25h")
+        sys.stdout.flush()
+    except Exception:
+        pass
+PY
+}
+
+pane_fzf_main() {
+	local run_dir="${1:-}"
+	local src_pane="${2:-}"
+	local left_text_w="${3:-48}"
+	local inner_sock="${4:-}"
+	[ -n "$run_dir" ] || exit 1
+
+	local self_path q_self q_src q_run_dir q_inner_sock
+	self_path="$(realpath "${BASH_SOURCE[0]}")"
+	q_self="$(shell_quote "$self_path")"
+	q_src="$(shell_quote "$src_pane")"
+	q_run_dir="$(shell_quote "$run_dir")"
+	q_inner_sock="$(shell_quote "$inner_sock")"
+
+	local mode_file="${run_dir}/mode"
+	local pmode_file="${run_dir}/pmode"
+	local rows_cache="${run_dir}/rows"
+	local focus_file="${run_dir}/focus"
+	local result_file="${run_dir}/result"
+	local sock_file="${run_dir}/anim.sock"
+	local prev_fifo="${run_dir}/prev.fifo"
+	local quota_fifo="${run_dir}/quota.fifo"
+	_FZF_ANIM_PID=""
+	_FZF_SOCK_FILE="$sock_file"
+	_FZF_INNER_SOCK="$inner_sock"
+	_FZF_PREV_FIFO="$prev_fifo"
+	_FZF_QUOTA_FIFO="$quota_fifo"
+
+	cleanup_fzf() {
+		if [ -n "${_FZF_ANIM_PID:-}" ]; then
+			kill "$_FZF_ANIM_PID" 2>/dev/null || true
+			_FZF_ANIM_PID=""
+		fi
+		[ -n "${_FZF_SOCK_FILE:-}" ] && rm -f "$_FZF_SOCK_FILE" 2>/dev/null || true
+		[ -p "${_FZF_PREV_FIFO:-}" ] && printf 'quit\n' 1<>"$_FZF_PREV_FIFO" 2>/dev/null || true
+		[ -p "${_FZF_QUOTA_FIFO:-}" ] && printf 'quit\n' 1<>"$_FZF_QUOTA_FIFO" 2>/dev/null || true
+		if [ -n "${_FZF_INNER_SOCK:-}" ]; then
+			env -u TMUX tmux -L "$_FZF_INNER_SOCK" kill-server 2>/dev/null || true
+		fi
+	}
+	trap cleanup_fzf EXIT INT TERM HUP
+
+	local q_mode_file q_rows_cache q_focus_file q_prev_fifo q_quota_fifo
+	q_mode_file="$(shell_quote "$mode_file")"
+	q_rows_cache="$(shell_quote "$rows_cache")"
+	q_focus_file="$(shell_quote "$focus_file")"
+	q_prev_fifo="$(shell_quote "$prev_fifo")"
+	q_quota_fifo="$(shell_quote "$quota_fifo")"
+
+	local mode="agents"
+	[ -f "$mode_file" ] && mode="$(cat "$mode_file" 2>/dev/null || echo agents)"
+	local prompt="Agents > "
+	[ "$mode" = "all" ] && prompt="All > "
+
+	local initial_list
+	if [ -s "$rows_cache" ]; then
+		initial_list="$(render_cached_rows "$rows_cache" 0)"
+	else
+		initial_list="$(list_entries "$mode" "$src_pane" "$left_text_w" 0 0 "$rows_cache")"
+	fi
+
+	# Background animator: ticks every 180ms via fzf's Unix socket + reload-sync (zero flicker).
+	if command -v curl >/dev/null 2>&1; then
+		(
+			local tick=0
+			while [ ! -S "$sock_file" ] && [ "$tick" -lt 25 ]; do
+				sleep 0.04
+				tick=$((tick + 1))
+			done
+			tick=1
+			while [ -S "$sock_file" ]; do
+				sleep 0.18 || break
+				[ -S "$sock_file" ] || break
+				local cur_m="agents"
+				[ -f "$mode_file" ] && cur_m="$(cat "$mode_file" 2>/dev/null || echo agents)"
+				local pinned_id=""
+				[ -n "${focus_file:-}" ] && [ -f "$focus_file" ] && IFS=$'\t' read -r pinned_id _ <"$focus_file" 2>/dev/null || true
+				local q_pinned
+				q_pinned="$(shell_quote "$pinned_id")"
+				if [ $((tick % 8)) -eq 0 ]; then
+					curl -fsS --max-time 1 --unix-socket "$sock_file" http://localhost \
+						-d "reload-sync(${q_self} --list ${cur_m} ${q_src} ${left_text_w} ${tick} 0 ${q_rows_cache})+transform(${q_self} --restore-pos ${q_rows_cache} ${q_pinned})" >/dev/null 2>&1 || true
+				elif [ -s "$rows_cache" ] && grep -qE $'\t(working|blocked|done)\t' "$rows_cache" 2>/dev/null; then
+					curl -fsS --max-time 1 --unix-socket "$sock_file" http://localhost \
+						-d "reload-sync(${q_self} --list ${cur_m} ${q_src} ${left_text_w} ${tick} 1 ${q_rows_cache})+transform(${q_self} --restore-pos ${q_rows_cache} ${q_pinned})" >/dev/null 2>&1 || true
+				fi
+				# Auto-refresh active agents' quota every ~2s (11 * 180ms = 1.98s).
+				if [ $((tick % 11)) -eq 0 ]; then
+					local cur_pm="pane"
+					[ -f "$pmode_file" ] && cur_pm="$(cat "$pmode_file" 2>/dev/null || echo pane)"
+					if [ "$cur_pm" = "quota" ]; then
+						spawn_quota_refresh 0 "$run_dir" 2
+					else
+						spawn_quota_refresh 0 "$run_dir" 2 "$rows_cache"
+					fi
+				fi
+				tick=$((tick + 1))
+			done
+		) &
+		_FZF_ANIM_PID=$!
+	fi
+
+	local reload_cmd="m=\$(cat ${q_mode_file} 2>/dev/null || echo agents); ${q_self} --list \"\$m\" ${q_src} ${left_text_w} 0 0 ${q_rows_cache}"
+	local toggle_cmd="${q_self} --toggle-mode ${q_mode_file} ${q_src} ${left_text_w} ${q_rows_cache}"
+	local focus_cmd="printf '%s\t%s\t%s\t%s\t%s\t%s\n' {1} {3} {4} {5} {6} {7} > ${q_focus_file}.\$\$ && mv -f ${q_focus_file}.\$\$ ${q_focus_file} && [ -p ${q_prev_fifo} ] && printf 'focus\n' 1<>${q_prev_fifo}"
+
+	local color_arg
+	color_arg="$(fzf_theme_args || true)"
+
+	local selected
+	selected="$(
+		printf '%s\n' "$initial_list" | SHELL=/bin/bash fzf \
+			--ansi \
+			${color_arg:+"$color_arg"} \
+			--height=100% \
+			--border=none \
+			--margin=0 \
+			--padding=0,1 \
+			--layout=reverse \
+			--no-scrollbar \
+			--no-separator \
+			--info=inline-right \
+			--pointer='▌' \
+			--listen-unsafe="$sock_file" \
+			--delimiter=$'\t' \
+			--with-nth=2 \
+			--prompt="$prompt" \
+			--header='l:open /:find s:roster u:quota ?:help' \
+			--bind="start:hide-input" \
+			--bind="focus:execute-silent(${focus_cmd})" \
+			--bind="j:down,k:up,l:accept,q:abort" \
+			--bind="s:execute-silent(${q_self} --toggle-pmode-pane roster ${q_run_dir})" \
+			--bind="u:execute-silent(${q_self} --toggle-pmode-pane quota ${q_run_dir})" \
+			--bind="/:show-input+unbind(j,k,l,q,/,?,s,u)" \
+			--bind='esc:transform:if [ "$FZF_INPUT_STATE" = hidden ]; then echo abort; else echo "hide-input+rebind(j,k,l,q,/,?,s,u)"; fi' \
+			--bind="ctrl-r:execute-silent(${q_self} --refresh-quota-smart-pane ${q_run_dir})+reload-sync(${reload_cmd})" \
+			--bind="tab:transform(${toggle_cmd})" \
+			--bind="ctrl-a:transform(${toggle_cmd})" \
+			--bind="ctrl-y:execute-silent(${q_self} --approve {1}; [ -p ${q_prev_fifo} ] && printf 'refresh\n' 1<>${q_prev_fifo})+reload-sync(${reload_cmd})" \
+			--bind="alt-e:execute-silent(${q_self} --interrupt {1}; [ -p ${q_prev_fifo} ] && printf 'refresh\n' 1<>${q_prev_fifo})+reload-sync(${reload_cmd})" \
+			--bind="ctrl-s:execute-silent(${q_self} --mark-seen {1})+reload-sync(${reload_cmd})" \
+			--bind="alt-d:execute-silent(${q_self} --mark-seen {1})+reload-sync(${reload_cmd})" \
+			--bind="ctrl-d:execute-silent([ -p ${q_prev_fifo} ] && printf 'half-down\n' 1<>${q_prev_fifo})" \
+			--bind="ctrl-u:execute-silent([ -p ${q_prev_fifo} ] && printf 'half-up\n' 1<>${q_prev_fifo})" \
+			--bind="pgdn:execute-silent([ -p ${q_prev_fifo} ] && printf 'half-down\n' 1<>${q_prev_fifo})" \
+			--bind="pgup:execute-silent([ -p ${q_prev_fifo} ] && printf 'half-up\n' 1<>${q_prev_fifo})" \
+			--bind="alt-j:execute-silent([ -p ${q_prev_fifo} ] && printf 'down\n' 1<>${q_prev_fifo})" \
+			--bind="alt-k:execute-silent([ -p ${q_prev_fifo} ] && printf 'up\n' 1<>${q_prev_fifo})" \
+			--bind="alt-x:execute-silent(tmux kill-pane -t {1} 2>/dev/null || true; [ -p ${q_prev_fifo} ] && printf 'refresh\n' 1<>${q_prev_fifo}; [ -p ${q_quota_fifo} ] && printf 'refresh\n' 1<>${q_quota_fifo})+reload-sync(${reload_cmd})" \
+			--bind="ctrl-x:execute-silent(tmux kill-pane -t {1} 2>/dev/null || true; [ -p ${q_prev_fifo} ] && printf 'refresh\n' 1<>${q_prev_fifo}; [ -p ${q_quota_fifo} ] && printf 'refresh\n' 1<>${q_quota_fifo})+reload-sync(${reload_cmd})" \
+			--bind="ctrl-/:execute-silent(${q_self} --toggle-preview-pane ${q_inner_sock})" \
+			--bind="?:execute-silent(${q_self} --open-keymaps-popup ${q_inner_sock} ${q_self})" \
+			--bind="f1:execute-silent(${q_self} --open-keymaps-popup ${q_inner_sock} ${q_self})" || true
+	)"
+
+	if [ -n "$selected" ]; then
+		local target_pane
+		target_pane="$(printf '%s\n' "$selected" | cut -f1)"
+		[ -n "$target_pane" ] && printf '%s\n' "$target_pane" >"$result_file"
+	fi
+
+	cleanup_fzf
+	trap - EXIT INT TERM HUP
+}
+
+popup_monitor_single() {
 	if ! command -v fzf >/dev/null 2>&1; then
 		tmux display-message "tmux-agents: missing required command 'fzf'"
 		exit 1
@@ -1758,12 +2626,16 @@ popup_monitor() {
 				[ -S "$sock_file" ] || break
 				local cur_m="agents"
 				[ -f "$mode_file" ] && cur_m="$(cat "$mode_file" 2>/dev/null || echo agents)"
+				local pinned_id=""
+				[ -n "${focus_file:-}" ] && [ -f "$focus_file" ] && IFS=$'\t' read -r pinned_id _ <"$focus_file" 2>/dev/null || true
+				local q_pinned
+				q_pinned="$(shell_quote "$pinned_id")"
 				if [ $((tick % 8)) -eq 0 ]; then
 					curl -fsS --max-time 1 --unix-socket "$sock_file" http://localhost \
-						-d "reload-sync(${q_self} --list ${cur_m} ${q_src} ${left_text_w} ${tick} 0 ${q_rows_cache})" >/dev/null 2>&1 || true
+						-d "reload-sync(${q_self} --list ${cur_m} ${q_src} ${left_text_w} ${tick} 0 ${q_rows_cache})+transform(${q_self} --restore-pos ${q_rows_cache} ${q_pinned})" >/dev/null 2>&1 || true
 				elif [ -s "$rows_cache" ] && grep -qE $'\t(working|blocked|done)\t' "$rows_cache" 2>/dev/null; then
 					curl -fsS --max-time 1 --unix-socket "$sock_file" http://localhost \
-						-d "reload-sync(${q_self} --list ${cur_m} ${q_src} ${left_text_w} ${tick} 1 ${q_rows_cache})" >/dev/null 2>&1 || true
+						-d "reload-sync(${q_self} --list ${cur_m} ${q_src} ${left_text_w} ${tick} 1 ${q_rows_cache})+transform(${q_self} --restore-pos ${q_rows_cache} ${q_pinned})" >/dev/null 2>&1 || true
 				fi
 				# Animate roster view (180ms) and pane+compact-roster view (360ms).
 				local cur_pm="pane"
@@ -1787,21 +2659,21 @@ popup_monitor() {
 				tick=$((tick + 1))
 			done
 		) &
-		anim_pid=$!
+		_FZF_ANIM_PID=$!
 	fi
 
 	# Warm quota/credits cache asynchronously for running agents if missing or stale (never blocks popup).
 	spawn_quota_refresh 0 "$sock_file" "$QUOTA_TTL" "$rows_cache"
 
 	local reload_cmd="m=\$(cat ${q_mode_file} 2>/dev/null || echo agents); ${q_self} --list \"\$m\" ${q_src} ${left_text_w} 0 0 ${q_rows_cache}"
-	local toggle_cmd="m=\$(cat ${q_mode_file} 2>/dev/null || echo agents); if [ \"\$m\" = agents ]; then echo all > ${q_mode_file}; echo 'change-prompt(All > )+reload-sync(${q_self} --list all ${q_src} ${left_text_w} 0 0 ${q_rows_cache})'; else echo agents > ${q_mode_file}; echo 'change-prompt(Agents > )+reload-sync(${q_self} --list agents ${q_src} ${left_text_w} 0 0 ${q_rows_cache})'; fi"
+	local toggle_cmd="${q_self} --toggle-mode ${q_mode_file} ${q_src} ${left_text_w} ${q_rows_cache}"
 
 	local color_arg
 	color_arg="$(fzf_theme_args || true)"
 
 	local selected
 	selected="$(
-		printf '%s\n' "$initial_list" | fzf \
+		printf '%s\n' "$initial_list" | SHELL=/bin/bash fzf \
 			--ansi \
 			${color_arg:+"$color_arg"} \
 			--height=100% \
@@ -1819,7 +2691,7 @@ popup_monitor() {
 			--delimiter=$'\t' \
 			--with-nth=2 \
 			--prompt="$prompt" \
-			--header='l:mở /:tìm s:roster u:quota ?:help' \
+			--header='l:open /:find s:roster u:quota ?:help' \
 			--bind="start:hide-input" \
 			--bind="j:down,k:up,l:accept,q:abort" \
 			--bind="s:transform(${q_self} --toggle-pmode roster ${q_pmode_file} ${q_sock_file})" \
@@ -1859,6 +2731,182 @@ popup_monitor() {
 	jump_to_pane "$target_pane"
 }
 
+popup_monitor() {
+	if ! command -v fzf >/dev/null 2>&1; then
+		tmux display-message "tmux-agents: missing required command 'fzf'"
+		exit 1
+	fi
+
+	local src_pane="${1:-}"
+	if [ -z "$src_pane" ] || [[ "$src_pane" == *"#{"* ]]; then
+		src_pane="$(tmux display-message -p '#{pane_id}' 2>/dev/null || true)"
+	fi
+
+	local cava_launch="$HOME/.config/cava/launch.sh"
+	local stty_sz inner_h inner_w
+	stty_sz="$(stty size </dev/tty 2>/dev/null || true)"
+	if [ -n "$stty_sz" ]; then
+		read -r inner_h inner_w <<<"$stty_sz"
+	else
+		inner_h="$(tput lines 2>/dev/null || echo 38)"
+		inner_w="$(tput cols 2>/dev/null || echo 154)"
+	fi
+	[ "${inner_w:-0}" -gt 0 ] 2>/dev/null || inner_w=154
+	[ "${inner_h:-0}" -gt 0 ] 2>/dev/null || inner_h=38
+
+	# Fallback to single-fzf layout if cava/python3 is unavailable or viewport is too compact.
+	if [ ! -x "$cava_launch" ] || ! command -v python3 >/dev/null 2>&1 || [ "$inner_w" -lt 76 ] || [ "$inner_h" -lt 20 ]; then
+		popup_monitor_single "$src_pane"
+		return
+	fi
+
+	local self_path outer_tmux
+	self_path="$(realpath "${BASH_SOURCE[0]}")"
+	outer_tmux="${TMUX:-}"
+
+	mkdir -p -m 700 "$CACHE_BASE"
+	local run_dir="${CACHE_BASE}/run.$$"
+	mkdir -p -m 700 "$run_dir"
+	local sock="popup-agents-$$"
+	local sock_dir="${TMUX_TMPDIR:-/tmp}/tmux-$(id -u)"
+	local tmp_conf="${run_dir}/tmux.conf"
+	local mode_file="${run_dir}/mode"
+	local pmode_file="${run_dir}/pmode"
+	local rows_cache="${run_dir}/rows"
+	local focus_file="${run_dir}/focus"
+	local result_file="${run_dir}/result"
+	local prev_fifo="${run_dir}/prev.fifo"
+	local quota_fifo="${run_dir}/quota.fifo"
+
+	_MULTI_SOCK="$sock"
+	_MULTI_SOCK_DIR="$sock_dir"
+	_MULTI_RUN_DIR="$run_dir"
+
+	cleanup_multi() {
+		if [ -n "${_MULTI_RUN_DIR:-}" ]; then
+			[ -p "${_MULTI_RUN_DIR}/prev.fifo" ] && printf 'quit\n' 1<>"${_MULTI_RUN_DIR}/prev.fifo" 2>/dev/null || true
+			[ -p "${_MULTI_RUN_DIR}/quota.fifo" ] && printf 'quit\n' 1<>"${_MULTI_RUN_DIR}/quota.fifo" 2>/dev/null || true
+		fi
+		[ -n "${_MULTI_SOCK:-}" ] && env -u TMUX tmux -L "$_MULTI_SOCK" kill-server 2>/dev/null || true
+		[ -n "${_MULTI_SOCK:-}" ] && [ -n "${_MULTI_SOCK_DIR:-}" ] && rm -f "${_MULTI_SOCK_DIR}/${_MULTI_SOCK}" 2>/dev/null || true
+		[ -n "${_MULTI_RUN_DIR:-}" ] && rm -rf "$_MULTI_RUN_DIR" 2>/dev/null || true
+	}
+	trap cleanup_multi EXIT INT TERM HUP
+
+	mkfifo -m 600 "$prev_fifo" "$quota_fifo"
+	printf 'pane\n' >"$pmode_file"
+
+	# Column widths: Left ~38% (min 43), Right ~62%
+	local left_w=$(( inner_w * 38 / 100 ))
+	[ "$left_w" -lt 43 ] && left_w=43
+	[ "$left_w" -gt $(( inner_w - 30 )) ] && left_w=$(( inner_w - 30 ))
+	local right_w=$(( inner_w - left_w - 1 ))
+	local left_text_w=$(( left_w - 3 ))
+	[ "$left_text_w" -lt 39 ] && left_text_w=39
+
+	local mode="agents"
+	local initial_list
+	initial_list="$(list_entries "agents" "$src_pane" "$left_text_w" 0 0 "$rows_cache")"
+	if [ -z "$initial_list" ]; then
+		mode="all"
+		initial_list="$(list_entries "all" "$src_pane" "$left_text_w" 0 0 "$rows_cache")"
+	fi
+	printf '%s\n' "$mode" >"$mode_file"
+
+	if [ -z "$initial_list" ]; then
+		cleanup_multi
+		trap - EXIT INT TERM HUP
+		tmux display-message "tmux-agents: không có pane nào"
+		exit 0
+	fi
+
+	# Pre-populate focus_file with the first entry so Preview paints immediately on frame 0.
+	printf '%s\n' "$initial_list" | head -n 1 | awk -F '\t' '{ printf "%s\t%s\t%s\t%s\t%s\t%s\n", $1, $3, $4, $5, $6, $7 }' >"$focus_file"
+
+	# Compute initial Quota & Cava-wave heights for left vertical stack.
+	local initial_quota quota_lines quota_h cava_h max_q
+	initial_quota="$(footer_quota "$left_text_w" "$rows_cache")"
+	quota_lines="$(printf '%s\n' "$initial_quota" | wc -l)"
+	max_q=$(( inner_h / 3 ))
+	[ "$max_q" -lt 7 ] && max_q=7
+	[ "$max_q" -gt 13 ] && max_q=13
+	quota_h=$(( quota_lines + 1 ))
+	[ "$quota_h" -lt 7 ] && quota_h=7
+	[ "$quota_h" -gt "$max_q" ] && quota_h=$max_q
+
+	cava_h=$(( inner_h * 20 / 100 ))
+	[ "$cava_h" -lt 5 ] && cava_h=5
+	[ "$cava_h" -gt 8 ] && cava_h=8
+	while [ $(( inner_h - quota_h - cava_h - 2 )) -lt 8 ] && [ "$cava_h" -gt 4 ]; do
+		cava_h=$(( cava_h - 1 ))
+	done
+
+	# Warm quota/credits cache asynchronously for running agents.
+	spawn_quota_refresh 0 "$run_dir" "$QUOTA_TTL" "$rows_cache"
+
+	local theme_mode border_fg
+	theme_mode="$("$cava_launch" --print-theme 2>/dev/null || echo dark)"
+	border_fg="$(tmux display-message -p '#{E:@theme-surface}' 2>/dev/null || true)"
+	if ! [[ "$border_fg" =~ ^#[0-9a-fA-F]{6}$ ]]; then
+		if [ "$theme_mode" = "light" ]; then
+			border_fg="#c8c8c8"
+		else
+			border_fg="#262626"
+		fi
+	fi
+
+	cat >"$tmp_conf" <<EOF
+set -g default-shell /bin/sh
+set -g default-terminal 'xterm-256color'
+set -as terminal-overrides ',*:Tc'
+set -s extended-keys on
+set -as terminal-features ',*:extkeys'
+set -g status off
+set -g mouse off
+set -sg escape-time 10
+set -g focus-events on
+set -g pane-border-style 'fg=${border_fg}'
+set -g pane-active-border-style 'fg=${border_fg}'
+set -g pane-border-lines single
+bind-key -n C-q kill-server
+set-hook -g pane-exited 'if-shell -F "#{==:#{hook_pane},#{@fzf_pane}}" "kill-server" "if-shell -F \"#{m:* #{@fzf_pane} *, #{W:#{P:#{pane_id} }} }\" \"select-pane -t #{@fzf_pane}\" \"kill-server\""'
+EOF
+
+	local cmd_fzf cmd_prev cmd_quota cmd_cava
+	printf -v cmd_fzf 'exec env TMUX=%q INNER_SOCK=%q %q --pane-fzf %q %q %q %q' \
+		"$outer_tmux" "$sock" "$self_path" "$run_dir" "$src_pane" "$left_text_w" "$sock"
+	printf -v cmd_prev 'exec env TMUX=%q %q --pane-preview %q %q' \
+		"$outer_tmux" "$self_path" "$run_dir" "$self_path"
+	printf -v cmd_quota 'exec env TMUX=%q %q --pane-quota %q %q %q' \
+		"$outer_tmux" "$self_path" "$run_dir" "$sock" "$cava_h"
+	printf -v cmd_cava 'exec /bin/bash -c '\''trap "trap - HUP TERM INT; kill 0 2>/dev/null || true; exit 0" HUP TERM INT; while [ -d "$1" ]; do "$2" --mode wave --theme "$3" </dev/null || true; [ -d "$1" ] || break; sleep 0.5; done'\'' _ %q %q %q' \
+		"$run_dir" "$cava_launch" "$theme_mode"
+
+	local p_fzf p_prev p_quota p_cava
+	p_fzf="$(env -u TMUX tmux -L "$sock" -f "$tmp_conf" new-session -d -P -F '#{pane_id}' -x "$inner_w" -y "$inner_h" -s agents "$cmd_fzf")"
+	p_prev="$(env -u TMUX tmux -L "$sock" split-window -d -h -l "$right_w" -t "$p_fzf" -P -F '#{pane_id}' "$cmd_prev")"
+	p_quota="$(env -u TMUX tmux -L "$sock" split-window -d -v -l "$quota_h" -t "$p_fzf" -P -F '#{pane_id}' "$cmd_quota")"
+	p_cava="$(env -u TMUX tmux -L "$sock" split-window -d -v -l "$cava_h" -t "$p_fzf" -P -F '#{pane_id}' "$cmd_cava")"
+
+	env -u TMUX tmux -L "$sock" set-option -g @fzf_pane "$p_fzf"
+	env -u TMUX tmux -L "$sock" set-option -g @prev_pane "$p_prev"
+	env -u TMUX tmux -L "$sock" set-option -g @quota_pane "$p_quota"
+	env -u TMUX tmux -L "$sock" set-option -g @cava_pane "$p_cava"
+	env -u TMUX tmux -L "$sock" set-option -g @prev_width "$right_w"
+	env -u TMUX tmux -L "$sock" select-pane -t "$p_fzf"
+
+	env -u TMUX tmux -L "$sock" attach-session -t agents || true
+
+	local target_pane=""
+	[ -f "$result_file" ] && target_pane="$(cat "$result_file" 2>/dev/null || true)"
+
+	cleanup_multi
+	trap - EXIT INT TERM HUP
+
+	[ -n "$target_pane" ] || exit 0
+	jump_to_pane "$target_pane"
+}
+
 case "${1:-}" in
 	--list)
 		list_entries "${2:-agents}" "${3:-}" "${4:-42}" "${5:-0}" "${6:-0}" "${7:-}"
@@ -1882,8 +2930,35 @@ case "${1:-}" in
 	--refresh-quota-smart)
 		refresh_quota_smart "${2:-}" "${3:-}"
 		;;
+	--refresh-quota-smart-pane)
+		refresh_quota_smart_pane "${2:-}"
+		;;
 	--toggle-pmode)
 		toggle_pmode "${2:-roster}" "${3:-}" "${4:-}"
+		;;
+	--toggle-pmode-pane)
+		toggle_pmode_pane "${2:-roster}" "${3:-}"
+		;;
+	--toggle-mode)
+		toggle_mode_action "${2:-}" "${3:-}" "${4:-48}" "${5:-}"
+		;;
+	--restore-pos)
+		restore_pos_action "${2:-}" "${3:-}"
+		;;
+	--toggle-preview-pane)
+		toggle_preview_pane "${2:-}"
+		;;
+	--open-keymaps-popup)
+		open_keymaps_popup "${2:-}" "${3:-}"
+		;;
+	--pane-fzf)
+		pane_fzf_main "${2:-}" "${3:-}" "${4:-48}" "${5:-}"
+		;;
+	--pane-preview)
+		pane_preview_daemon "${2:-}" "${3:-}"
+		;;
+	--pane-quota)
+		pane_quota_daemon "${2:-}" "${3:-}" "${4:-7}"
 		;;
 	--mark-seen)
 		mark_seen_pane "${2:-}"
@@ -1896,6 +2971,9 @@ case "${1:-}" in
 		;;
 	--keymaps)
 		run_keymaps_finder
+		;;
+	--plain)
+		popup_monitor_single "${2:-}"
 		;;
 	*)
 		popup_monitor "${1:-}"
