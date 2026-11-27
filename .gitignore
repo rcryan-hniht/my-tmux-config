@@ -1,0 +1,6 @@
+plugins/
+.omc/
+*.bak
+*.tmp
+*.swp
+*.before-*
